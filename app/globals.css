@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
+/* Light mode: a very soft blush with warm pink + amber glows (see body below). */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fff5f9;
+  --foreground: #831843; /* pink-900: dark enough to read easily */
+  --glow-pink: #fbcfe8; /* pink-200 */
+  --glow-amber: #fde68a; /* amber-200 */
 }
 
 @theme inline {
@@ -14,13 +17,21 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    /* Dark mode: deep plum, so the pink-900 cards still stand out. */
+    --background: #1f0a17;
+    --foreground: #fce7f3; /* pink-100 */
+    --glow-pink: #4a1035;
+    --glow-amber: #3d2606;
   }
 }
 
 body {
-  background: var(--background);
+  /* Two soft circles of colour (pink top-left, amber top-right) on top of the base colour. */
+  background-color: var(--background);
+  background-image:
+    radial-gradient(circle at 0% 0%, var(--glow-pink), transparent 45%),
+    radial-gradient(circle at 100% 0%, var(--glow-amber), transparent 40%);
+  background-attachment: fixed;
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }

@@ -1,69 +1,102 @@
-import Image from "next/image";
+// The main page. It OWNS the state and runs the "click Analyze" flow.
+// The components only display things. This file decides what happens.
+//
+// "use client" is needed because this page uses state (useState) and reacts
+// to clicks, which can only happen in the browser. (Pages are server-rendered
+// by default in the Next.js App Router.)
+"use client";
+
+import { useState } from "react";
+import TextInput from "@/components/TextInput";
+import AnalysisResults from "@/components/AnalysisResults";
+import LoadingState from "@/components/LoadingState";
+import ErrorMessage from "@/components/ErrorMessage";
+import type { AnalysisResult, ApiError } from "@/lib/types";
 
 export default function Home() {
+  // The page's state:
+  const [text, setText] = useState(""); // what the user typed
+  const [isLoading, setIsLoading] = useState(false); // waiting for the server?
+  const [result, setResult] = useState<AnalysisResult | null>(null); // last success
+  const [error, setError] = useState<string | null>(null); // last error
+
+  async function handleAnalyze() {
+    // Step 2: quick check in the browser. No need to bother the server.
+    if (text.trim().length === 0) {
+      setResult(null);
+      setError("Please enter some text to analyze.");
+      return;
+    }
+
+    // Step 3: enter the loading state and clear old output.
+    setIsLoading(true);
+    setResult(null);
+    setError(null);
+
+    try {
+      // Step 4: call OUR endpoint (not the AI directly; see app/api/analyze/route.ts).
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+
+      // Steps 5–7 happen on the server. Here we receive its answer (step 8).
+      const data: AnalysisResult | ApiError = await response.json();
+
+      if (!response.ok || "error" in data) {
+        setError("error" in data ? data.error : "Unexpected server response.");
+        return;
+      }
+      setResult(data);
+    } catch {
+      // fetch() itself failed: offline, server down, or a non-JSON reply.
+      setError(
+        "Could not reach the server. Please check your connection and try again.",
+      );
+    } finally {
+      // Step 9: always leave the loading state, success or failure.
+      setIsLoading(false);
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-10 sm:px-6 lg:py-16">
+      <header className="mb-8 text-center lg:mb-12">
+        {/* Gradient text: paint a pink→amber background, clip it to the letters, make the text itself transparent. */}
+        <h1 className="bg-linear-to-r from-pink-600 to-amber-500 bg-clip-text pb-1 text-3xl font-bold tracking-tight text-transparent sm:text-5xl dark:from-pink-400 dark:to-amber-300">
+          AI Text Analyzer
+        </h1>
+        <p className="mt-2 text-pink-900/70 dark:text-pink-200/80">
+          Get a summary, sentiment, key topics and a suggested reply for any
+          text.
+        </p>
+        <p className="mt-4 inline-block rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+          Demo mode: results are mock data, no AI is called yet
+        </p>
+      </header>
+
+      {/* One column on phones, two columns (input | results) on large screens. */}
+      <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
+        <TextInput
+          text={text}
+          isLoading={isLoading}
+          onTextChange={setText}
+          onAnalyze={handleAnalyze}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+
+        {/* Step 10: React shows exactly one of these, based on the state. */}
+        <section aria-live="polite">
+          {isLoading && <LoadingState />}
+          {!isLoading && error && <ErrorMessage message={error} />}
+          {!isLoading && result && <AnalysisResults result={result} />}
+          {!isLoading && !error && !result && (
+            <div className="rounded-2xl border-2 border-dashed border-pink-300 bg-white/60 p-10 text-center text-sm text-pink-500 dark:border-pink-700 dark:bg-pink-950/40 dark:text-pink-300">
+              Your analysis will appear here.
+            </div>
+          )}
+        </section>
+      </div>
+    </main>
   );
 }
