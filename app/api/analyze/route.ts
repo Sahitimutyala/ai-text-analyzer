@@ -6,7 +6,7 @@
 // Its only job is HTTP: read the request, validate it, call analyzeText(),
 // and send back JSON in the shape defined in lib/types.ts.
 
-import { analyzeText } from "@/lib/analyzer";
+import { AnalysisError, analyzeText } from "@/lib/analyzer";
 import { MAX_TEXT_LENGTH, type AnalysisResult, type ApiError } from "@/lib/types";
 
 // Small typed helpers, so every response matches our contract.
@@ -47,6 +47,11 @@ export async function POST(request: Request) {
     const result = await analyzeText(text.trim());
     return success(result);
   } catch (err) {
+    // AnalysisError messages were written to be user-friendly (e.g. "API key is invalid"),
+    // so show them. Anything else is unexpected: log it and show a generic message.
+    if (err instanceof AnalysisError) {
+      return failure(err.message, 500);
+    }
     console.error("Analysis failed:", err);
     return failure("Something went wrong while analyzing your text. Please try again.", 500);
   }
