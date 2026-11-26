@@ -1,10 +1,23 @@
 // The "Recent Analyses" section: the last five saved analyses.
 // Like the other components, it only displays data and reports clicks to the
 // parent (page.tsx). It doesn't read or write localStorage itself.
+//
+// The search box, sentiment filter and sort order are "view" state: they only
+// change what is SHOWN. They live here, and the saved list (`items`) is never changed.
 
+import { useState } from "react";
 import type { HistoryItem } from "@/lib/history";
 import { MAX_HISTORY } from "@/lib/history";
+import {
+  DEFAULT_VIEW,
+  filterAndSortHistory,
+  type HistoryView,
+  type SentimentFilter,
+  type SortOrder,
+} from "@/lib/historyFilters";
 import SentimentBadge from "./SentimentBadge";
+
+const FILTERS: SentimentFilter[] = ["All", "Positive", "Negative", "Neutral"];
 
 interface RecentAnalysesProps {
   items: HistoryItem[];
@@ -30,6 +43,13 @@ export default function RecentAnalyses({
   onDelete,
   onClear,
 }: RecentAnalysesProps) {
+  const [view, setView] = useState<HistoryView>(DEFAULT_VIEW);
+  const update = (change: Partial<HistoryView>) => setView((v) => ({ ...v, ...change }));
+
+  // Recalculated on every render from the saved list + the current choices.
+  // Search, filter and sort all apply together.
+  const visible = filterAndSortHistory(items, view);
+
   return (
     <section
       aria-labelledby="recent-analyses-heading"
@@ -61,13 +81,82 @@ export default function RecentAnalyses({
         )}
       </div>
 
+      {items.length > 0 && (
+        <div className="mb-4 flex flex-col gap-3">
+          {/* Search + sort: stacked on phones, side by side from "sm" up. */}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <label htmlFor="history-search" className="sr-only">
+              Search saved analyses
+            </label>
+            <input
+              id="history-search"
+              type="search"
+              value={view.query}
+              onChange={(e) => update({ query: e.target.value })}
+              placeholder="Search text or summary…"
+              className="min-w-0 flex-1 rounded-xl border border-pink-300 bg-pink-50 px-3 py-2 text-sm text-pink-800 outline-none transition placeholder:text-pink-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 dark:border-pink-700 dark:bg-pink-950 dark:text-pink-100 dark:focus:ring-amber-900"
+            />
+            <label htmlFor="history-sort" className="sr-only">
+              Sort saved analyses
+            </label>
+            <select
+              id="history-sort"
+              value={view.sort}
+              onChange={(e) => update({ sort: e.target.value as SortOrder })}
+              className="rounded-xl border border-pink-300 bg-pink-50 px-3 py-2 text-sm text-pink-800 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 dark:border-pink-700 dark:bg-pink-950 dark:text-pink-100 dark:focus:ring-amber-900"
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
+          </div>
+
+          {/* Sentiment filter: one pill per option; aria-pressed tells screen readers which is on. */}
+          <div role="group" aria-label="Filter by sentiment" className="flex flex-wrap gap-2">
+            {FILTERS.map((option) => {
+              const active = view.sentiment === option;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => update({ sentiment: option })}
+                  className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                    active
+                      ? "border-amber-500 bg-amber-500 text-white dark:border-amber-400 dark:bg-amber-500"
+                      : "border-pink-200 bg-white text-pink-700 hover:border-pink-400 dark:border-pink-700 dark:bg-pink-950 dark:text-pink-200"
+                  }`}
+                >
+                  {option}
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="text-xs text-pink-900/60 dark:text-pink-200/70" aria-live="polite">
+            Showing {visible.length} of {items.length}
+          </p>
+        </div>
+      )}
+
       {items.length === 0 ? (
         <p className="rounded-xl border-2 border-dashed border-pink-200 p-6 text-center text-sm text-pink-500 dark:border-pink-700 dark:text-pink-300">
           No saved analyses yet. Your results will appear here after you analyze some text.
         </p>
+      ) : visible.length === 0 ? (
+        <div className="rounded-xl border-2 border-dashed border-pink-200 p-6 text-center text-sm text-pink-500 dark:border-pink-700 dark:text-pink-300">
+          <p>No saved analyses match your search or filter.</p>
+          {/* Nothing matches, so a search or filter must be active: offer a reset. */}
+          <button
+            type="button"
+            onClick={() => update({ query: "", sentiment: "All" })}
+            className="mt-2 rounded-lg px-3 py-1.5 text-sm font-medium text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-pink-800"
+          >
+            Show all
+          </button>
+        </div>
       ) : (
         <ul className="flex flex-col gap-2">
-          {items.map((item) => {
+          {visible.map((item) => {
             const isSelected = item.id === selectedId;
             return (
               <li

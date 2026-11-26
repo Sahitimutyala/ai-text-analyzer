@@ -43,6 +43,7 @@ Calling an AI API takes one line of code. Doing it safely and reliably inside a 
 - **See it work:** a live character counter (which turns red over the limit), an **Analyzing…** state with a spinner, then the four result cards.
 - **Read the sentiment at a glance:** a green, red or neutral badge.
 - **Revisit past results:** the **Recent Analyses** section keeps your last five analyses, with the original text, all four results and the date and time. Click one to show it again instantly, with no new AI call. Delete single items or clear the whole history. It's saved in your browser, so it survives refreshes and restarts (see [Analysis history](#analysis-history-localstorage)).
+- **Find a past analysis:** search the saved text and summaries as you type, filter by Positive, Negative or Neutral, and sort newest or oldest first. All three work together, without any AI call.
 - **Use it on any screen:** one column on phones, input and results side by side on large screens. It follows your system's light or dark mode.
 
 ## A request, end to end
@@ -96,10 +97,11 @@ A request usually takes about 3–6 seconds, almost all of it in step 4.
 | **Open** a saved item | `page.tsx` puts the saved `result` straight into the results section and the saved text back in the text box. **No request is sent**, so it's instant and free. |
 | **Delete** one item | `deleteFromHistory(id)` saves the list without that item. |
 | **Clear history** | After a confirmation, `clearHistory()` removes the key with `localStorage.removeItem(key)`. |
+| **Search, filter, sort** | `filterAndSortHistory(items, { query, sentiment, sort })` in `lib/historyFilters.ts` returns a **new** list to display. Search checks the original text and the summary, ignoring case. The filter keeps one sentiment, or All. The sort orders a copy by date. It never writes to localStorage and never calls the AI, so the saved history can't change while you search. The choices are view state inside `RecentAnalyses.tsx`. |
 
 **Why `useSyncExternalStore` and not `useEffect`.** Next.js renders the page on the server first, where localStorage doesn't exist. `useHistory()` uses React's `useSyncExternalStore`, which shows an empty list during that server render and then the saved list as soon as the page loads in the browser. That avoids a hydration mismatch, which happens when the server HTML and the first browser render differ. It also re-renders the page whenever the history changes, including from another open tab, through the browser's `storage` event.
 
-**The history only lives in this browser.** It isn't shared between browsers or devices, and it disappears if the user clears their site data. There is no database and no account.
+**The history only lives in this browser.** It isn't shared between browsers or devices, and it disappears if the user clears their site data. There is no database and no account. The plan for moving the history to a database (data model, MongoDB and SQL versions, queries, and the migration steps) is in [DATABASE_DESIGN.md](DATABASE_DESIGN.md).
 
 ## Architecture
 
@@ -136,6 +138,7 @@ Each layer has one job, and they share one data contract, `lib/types.ts`:
 | `components/*` | Display only. They receive data and callbacks as props and never fetch anything. |
 | `app/page.tsx` | Owns the page state (`text`, `isLoading`, `result`, `error`, the selected history item), runs the request flow, and connects the history actions. A Client Component (`"use client"`). |
 | `lib/history.ts` | Saves, reads, deletes and clears past analyses in localStorage. Browser-only. |
+| `lib/historyFilters.ts` | A pure function that searches, filters and sorts a copy of the history for display |
 | `app/api/analyze/route.ts` | HTTP only: parse, validate, call `analyzeText()`, and return JSON with the right status code. |
 | `lib/analyzer.ts` | The AI integration: prompt, schema, OpenAI client, reply clean-up and error mapping. Server-only. |
 | `lib/mockAnalyzer.ts` | A keyword-based fake analyzer, used automatically when no API key is configured. |
@@ -295,6 +298,19 @@ The history feature was tested end to end in a real browser (Microsoft Edge, aut
 | Broken JSON in storage | Empty history, and the page still works |
 | Phone width (375 px) | Layout stacks, with no horizontal scrolling |
 
+Search, filter and sort were tested the same way, with 5 seeded analyses. All 24 checks passed, with **0 AI calls**:
+
+| Check | Result |
+|---|---|
+| Type in the search box | The list updates on every keystroke. It matches the original text and the summary, ignoring case. |
+| No match | "No saved analyses match…", with a **Show all** button that resets the search and filter |
+| Positive / Negative / Neutral / All | Only that sentiment is shown, and the active pill is highlighted |
+| Newest first / Oldest first | The list is ordered by the saved date |
+| Search + filter + sort together | Combined correctly, and "Showing 2 of 5" is displayed |
+| After all of the above | The localStorage value is byte-for-byte unchanged |
+| Delete while filtered | Only that item is removed from storage |
+| Phone width (375 px) | The controls stack, with no horizontal scrolling |
+
 To check the API directly while the dev server is running:
 
 ```bash
@@ -360,7 +376,7 @@ The OpenAI client uses a **30-second timeout** and **one automatic retry** for t
 | No automated tests. Testing so far is manual. | Unit tests for the route's validation and `analyzeText()` error mapping (with a mocked OpenAI client), plus an end-to-end test of the page. |
 | No rate limiting or authentication on the API route. | Per-IP rate limiting, and/or requiring sign-in before analyzing. |
 | Only three sentiment values. Mixed text becomes Neutral. | Add "Mixed", or return a sentiment score alongside the label. |
-| History is per browser and limited to the last 5. | Sync it to a database with user accounts, or add search across more entries. |
+| History is per browser and limited to the last 5. | Move it to a database with user accounts. See [DATABASE_DESIGN.md](DATABASE_DESIGN.md). |
 | The mock analyzer only understands English keywords. | It's only a fallback; real analysis handles any language the model supports. |
 | One request at a time, with no cancel button. | An `AbortController` to cancel a slow request. |
 | No "copy reply" button. | A copy-to-clipboard button on the suggested response. |
@@ -380,17 +396,19 @@ ai-text-analyzer/
 │   ├── AnalysisResults.tsx     # The four result cards
 │   ├── ErrorMessage.tsx        # Error alert box
 │   ├── LoadingState.tsx        # Spinner while analyzing
-│   ├── RecentAnalyses.tsx      # The Recent Analyses list: open, delete, clear
+│   ├── RecentAnalyses.tsx      # The Recent Analyses list: search, filter, sort, open, delete, clear
 │   ├── SentimentBadge.tsx      # Positive / Negative / Neutral pill (normal and small sizes)
 │   └── TextInput.tsx           # Textarea, character counter, example + Analyze buttons
 ├── lib/
 │   ├── analyzer.ts             # OpenAI integration: prompt, schema, client, error mapping (server-only)
 │   ├── history.ts              # Analysis history in localStorage (browser-only)
+│   ├── historyFilters.ts       # Search, sentiment filter and sort (pure, never changes the saved list)
 │   ├── mockAnalyzer.ts         # Keyword-based fallback used when no API key is set
 │   └── types.ts                # Shared types and MAX_TEXT_LENGTH
 ├── public/                     # Static files (default Next.js icons)
 ├── .env.example                # Template for .env.local (no real values)
 ├── AGENTS.md                   # Notes for AI coding assistants (generated by Next.js)
+├── DATABASE_DESIGN.md          # Planned database structure for moving history off localStorage
 ├── eslint.config.mjs
 ├── next.config.ts
 ├── package.json
