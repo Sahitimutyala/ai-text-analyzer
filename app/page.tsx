@@ -6,11 +6,19 @@
 // by default in the Next.js App Router.)
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import TextInput from "@/components/TextInput";
 import AnalysisResults from "@/components/AnalysisResults";
 import LoadingState from "@/components/LoadingState";
 import ErrorMessage from "@/components/ErrorMessage";
+import RecentAnalyses from "@/components/RecentAnalyses";
+import {
+  addToHistory,
+  clearHistory,
+  deleteFromHistory,
+  useHistory,
+  type HistoryItem,
+} from "@/lib/history";
 import type { AnalysisResult, ApiError } from "@/lib/types";
 
 export default function Home() {
@@ -19,6 +27,33 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false); // waiting for the server?
   const [result, setResult] = useState<AnalysisResult | null>(null); // last success
   const [error, setError] = useState<string | null>(null); // last error
+
+  // History (saved in localStorage by lib/history.ts):
+  const history = useHistory(); // the saved list, newest first
+  const [selectedId, setSelectedId] = useState<string | null>(null); // which saved item is shown
+  const resultsRef = useRef<HTMLElement>(null); // used to scroll the results into view
+
+  /** Show a saved analysis in the results section. No AI call, no cost. */
+  function handleSelectHistory(item: HistoryItem) {
+    setText(item.text);
+    setResult(item.result);
+    setError(null);
+    setSelectedId(item.id);
+    // On phones the results are above the history, so scroll up to them.
+    resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function handleDeleteHistory(id: string) {
+    deleteFromHistory(id);
+    if (id === selectedId) setSelectedId(null);
+  }
+
+  function handleClearHistory() {
+    if (window.confirm("Delete all saved analyses? This can't be undone.")) {
+      clearHistory();
+      setSelectedId(null);
+    }
+  }
 
   async function handleAnalyze() {
     // Step 2: quick check in the browser. No need to bother the server.
@@ -32,6 +67,7 @@ export default function Home() {
     setIsLoading(true);
     setResult(null);
     setError(null);
+    setSelectedId(null);
 
     try {
       // Step 4: call OUR endpoint (not the AI directly; see app/api/analyze/route.ts).
@@ -49,6 +85,10 @@ export default function Home() {
         return;
       }
       setResult(data);
+
+      // NEW: save the successful analysis to the history (localStorage).
+      const saved = addToHistory(text.trim(), data);
+      setSelectedId(saved.id);
     } catch {
       // fetch() itself failed: offline, server down, or a non-JSON reply.
       setError(
@@ -86,7 +126,7 @@ export default function Home() {
         />
 
         {/* Step 10: React shows exactly one of these, based on the state. */}
-        <section aria-live="polite">
+        <section ref={resultsRef} aria-live="polite" className="scroll-mt-4">
           {isLoading && <LoadingState />}
           {!isLoading && error && <ErrorMessage message={error} />}
           {!isLoading && result && <AnalysisResults result={result} />}
@@ -97,6 +137,16 @@ export default function Home() {
           )}
         </section>
       </div>
+
+      {/* NEW: the last five saved analyses, full width under the input and results. */}
+      <RecentAnalyses
+        items={history}
+        selectedId={selectedId}
+        disabled={isLoading}
+        onSelect={handleSelectHistory}
+        onDelete={handleDeleteHistory}
+        onClear={handleClearHistory}
+      />
     </main>
   );
 }

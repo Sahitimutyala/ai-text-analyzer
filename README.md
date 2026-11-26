@@ -21,7 +21,7 @@ AI Text Analyzer is a small, complete example of adding an AI model to a Next.js
 
 **Contents**
 
-- **Overview:** [Why this project is interesting](#why-this-project-is-interesting) · [What you can do](#what-you-can-do) · [A request, end to end](#a-request-end-to-end) · [Architecture](#architecture) · [The prompt](#the-prompt) · [The response format](#the-response-format)
+- **Overview:** [Why this project is interesting](#why-this-project-is-interesting) · [What you can do](#what-you-can-do) · [A request, end to end](#a-request-end-to-end) · [Analysis history](#analysis-history-localstorage) · [Architecture](#architecture) · [The prompt](#the-prompt) · [The response format](#the-response-format)
 - **Run & reference:** [Getting started](#getting-started) · [Environment variables](#environment-variables) · [Scripts](#scripts) · [Testing](#testing) · [Error handling](#error-handling) · [Key decisions](#key-decisions--trade-offs) · [Security](#security) · [Limitations](#limitations--possible-improvements) · [Project structure](#project-structure) · [Packages](#packages-and-why-each-is-used)
 
 ---
@@ -42,6 +42,7 @@ Calling an AI API takes one line of code. Doing it safely and reliably inside a 
 - **Try an example:** one click fills the box with a sample customer complaint.
 - **See it work:** a live character counter (which turns red over the limit), an **Analyzing…** state with a spinner, then the four result cards.
 - **Read the sentiment at a glance:** a green, red or neutral badge.
+- **Revisit past results:** the **Recent Analyses** section keeps your last five analyses, with the original text, all four results and the date and time. Click one to show it again instantly, with no new AI call. Delete single items or clear the whole history. It's saved in your browser, so it survives refreshes and restarts (see [Analysis history](#analysis-history-localstorage)).
 - **Use it on any screen:** one column on phones, input and results side by side on large screens. It follows your system's light or dark mode.
 
 ## A request, end to end
@@ -60,8 +61,45 @@ Here is what happens when you paste *"My order arrived broken and nobody replies
 5. **Validation of the reply.** The SDK converts the reply from JSON and runs `AnalysisSchema.parse()` on it, then exposes it as `response.output_parsed`. `analyzeText()` trims the strings, drops empty topics and keeps at most 5.
 6. **Response to the browser.** The route returns `200` with the `AnalysisResult` JSON. If anything failed, it returns `500` with a friendly `{ "error": "…" }`. Technical details go only to the server log.
 7. **The screen updates.** `page.tsx` stores the result (or the error) in React state, a `finally` block turns the loading state off, and React renders the four cards or the error box.
+8. **The result is saved.** On success, `addToHistory()` saves the text and the result to the browser's localStorage, and the new entry appears at the top of **Recent Analyses**.
 
 A request usually takes about 3–6 seconds, almost all of it in step 4.
+
+## Analysis history (localStorage)
+
+**What localStorage is.** A small key → value store built into every browser. Each website gets its own private area on the user's computer (about 5 MB). Data stays there after a refresh or a browser restart, until the user or the site deletes it. It is never sent to the server automatically. It stores **text only**, so the history list is converted to a JSON string to save it, and parsed back to read it.
+
+**What is saved.** Under one key, `ai-text-analyzer:history`, as a JSON array, newest first, with at most 5 items:
+
+```json
+[
+  {
+    "id": "1764152520000-k3j9xa",
+    "text": "My package arrived two weeks late and the screen was cracked…",
+    "result": {
+      "summary": "The customer says their package arrived two weeks late…",
+      "sentiment": "Negative",
+      "topics": ["Late Delivery", "Damaged Item", "Refund Request"],
+      "suggestedResponse": "I'm very sorry your package arrived late and damaged…"
+    },
+    "analyzedAt": "2026-11-26T10:22:00.000Z"
+  }
+]
+```
+
+**How it works** (`lib/history.ts`, browser-only):
+
+| Action | What happens |
+|---|---|
+| **Save**, after a successful analysis | `addToHistory(text, result)` creates an item with an id and the current time, puts it first, removes an older entry with the same text, keeps the newest 5, then runs `localStorage.setItem(key, JSON.stringify(list))`. |
+| **Read**, on page load and after each change | `useHistory()` reads `localStorage.getItem(key)`, runs `JSON.parse`, and keeps only entries with the expected shape. Missing, edited or broken data gives an empty list instead of a crash. |
+| **Open** a saved item | `page.tsx` puts the saved `result` straight into the results section and the saved text back in the text box. **No request is sent**, so it's instant and free. |
+| **Delete** one item | `deleteFromHistory(id)` saves the list without that item. |
+| **Clear history** | After a confirmation, `clearHistory()` removes the key with `localStorage.removeItem(key)`. |
+
+**Why `useSyncExternalStore` and not `useEffect`.** Next.js renders the page on the server first, where localStorage doesn't exist. `useHistory()` uses React's `useSyncExternalStore`, which shows an empty list during that server render and then the saved list as soon as the page loads in the browser. That avoids a hydration mismatch, which happens when the server HTML and the first browser render differ. It also re-renders the page whenever the history changes, including from another open tab, through the browser's `storage` event.
+
+**The history only lives in this browser.** It isn't shared between browsers or devices, and it disappears if the user clears their site data. There is no database and no account.
 
 ## Architecture
 
@@ -96,7 +134,8 @@ Each layer has one job, and they share one data contract, `lib/types.ts`:
 | Layer | Responsibility |
 |---|---|
 | `components/*` | Display only. They receive data and callbacks as props and never fetch anything. |
-| `app/page.tsx` | Owns the page state (`text`, `isLoading`, `result`, `error`) and runs the request flow. A Client Component (`"use client"`). |
+| `app/page.tsx` | Owns the page state (`text`, `isLoading`, `result`, `error`, the selected history item), runs the request flow, and connects the history actions. A Client Component (`"use client"`). |
+| `lib/history.ts` | Saves, reads, deletes and clears past analyses in localStorage. Browser-only. |
 | `app/api/analyze/route.ts` | HTTP only: parse, validate, call `analyzeText()`, and return JSON with the right status code. |
 | `lib/analyzer.ts` | The AI integration: prompt, schema, OpenAI client, reply clean-up and error mapping. Server-only. |
 | `lib/mockAnalyzer.ts` | A keyword-based fake analyzer, used automatically when no API key is configured. |
@@ -243,6 +282,19 @@ There are no automated tests yet. The app was tested manually against the real O
 | More than 5,000 characters | Button disabled; the server also returns `400` |
 | A server started with an invalid API key | `500` with "The server's AI API key is invalid…" |
 
+The history feature was tested end to end in a real browser (Microsoft Edge, automated with Playwright). All 32 checks passed:
+
+| Check | Result |
+|---|---|
+| Analyze new text | Appears at the top of Recent Analyses, with text, summary, sentiment, topics, reply and date/time saved |
+| Refresh the page, and open the app in a new tab | History is still there |
+| Click an older analysis | Its saved results and original text appear, and **no request** is sent to `/api/analyze` |
+| Delete one item | Removed from the list and from localStorage, and still gone after a refresh |
+| Clear history | Cancel keeps everything. OK empties the list and removes the localStorage key. |
+| 7 items in storage | Only the newest 5 are shown |
+| Broken JSON in storage | Empty history, and the page still works |
+| Phone width (375 px) | Layout stacks, with no horizontal scrolling |
+
 To check the API directly while the dev server is running:
 
 ```bash
@@ -299,6 +351,7 @@ The OpenAI client uses a **30-second timeout** and **one automatic retry** for t
 
 - **No authentication or rate limiting on `/api/analyze`.** If the app is deployed publicly, anyone who finds the URL can make requests on your OpenAI account. Before deploying, add a usage limit in the OpenAI dashboard and consider sign-in or per-IP rate limiting.
 - The AI can still misread tone, especially in sarcasm or mixed text. Results are labelled "AI-generated and may contain mistakes".
+- **History is stored unencrypted in localStorage.** Anyone using the same browser profile can see past analyses. Don't analyze sensitive text on a shared computer, or use **Clear history** afterwards.
 
 ## Limitations & possible improvements
 
@@ -307,7 +360,7 @@ The OpenAI client uses a **30-second timeout** and **one automatic retry** for t
 | No automated tests. Testing so far is manual. | Unit tests for the route's validation and `analyzeText()` error mapping (with a mocked OpenAI client), plus an end-to-end test of the page. |
 | No rate limiting or authentication on the API route. | Per-IP rate limiting, and/or requiring sign-in before analyzing. |
 | Only three sentiment values. Mixed text becomes Neutral. | Add "Mixed", or return a sentiment score alongside the label. |
-| No history. A result disappears when you analyze new text or reload. | Save past analyses in local storage or a database. |
+| History is per browser and limited to the last 5. | Sync it to a database with user accounts, or add search across more entries. |
 | The mock analyzer only understands English keywords. | It's only a fallback; real analysis handles any language the model supports. |
 | One request at a time, with no cancel button. | An `AbortController` to cancel a slow request. |
 | No "copy reply" button. | A copy-to-clipboard button on the suggested response. |
@@ -327,10 +380,12 @@ ai-text-analyzer/
 │   ├── AnalysisResults.tsx     # The four result cards
 │   ├── ErrorMessage.tsx        # Error alert box
 │   ├── LoadingState.tsx        # Spinner while analyzing
-│   ├── SentimentBadge.tsx      # Positive / Negative / Neutral pill
+│   ├── RecentAnalyses.tsx      # The Recent Analyses list: open, delete, clear
+│   ├── SentimentBadge.tsx      # Positive / Negative / Neutral pill (normal and small sizes)
 │   └── TextInput.tsx           # Textarea, character counter, example + Analyze buttons
 ├── lib/
 │   ├── analyzer.ts             # OpenAI integration: prompt, schema, client, error mapping (server-only)
+│   ├── history.ts              # Analysis history in localStorage (browser-only)
 │   ├── mockAnalyzer.ts         # Keyword-based fallback used when no API key is set
 │   └── types.ts                # Shared types and MAX_TEXT_LENGTH
 ├── public/                     # Static files (default Next.js icons)

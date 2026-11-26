@@ -20,15 +20,24 @@ const STYLES: Record<Sentiment, { className: string; emoji: string }> = {
   },
 };
 
+// "md" is the original size (used in the results card); "sm" is a compact
+// version for the Recent Analyses list.
+const SIZES = {
+  md: "gap-1.5 px-3 py-1 text-sm",
+  sm: "gap-1 px-2 py-0.5 text-xs",
+};
+
 export default function SentimentBadge({
   sentiment,
+  size = "md",
 }: {
   sentiment: Sentiment;
+  size?: keyof typeof SIZES;
 }) {
   const style = STYLES[sentiment];
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${style.className}`}
+      className={`inline-flex items-center rounded-full font-semibold ${SIZES[size]} ${style.className}`}
     >
       <span aria-hidden="true">{style.emoji}</span>
       {sentiment}
